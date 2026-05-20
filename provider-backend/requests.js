@@ -13,7 +13,7 @@ class RequestsStore {
   /**
    * Add a new request to the queue
    */
-  addRequest(id, messages, model, stream, res) {
+  addRequest(id, messages, model, stream, res, tools = null, tool_choice = null) {
     const request = {
       id,
       timestamp: Date.now(),
@@ -22,7 +22,10 @@ class RequestsStore {
       stream,
       status: 'pending',
       response: null,
+      tool_calls: null,
       res, // Store the response object so we can reply async
+      tools,
+      tool_choice,
     };
 
     this.requests.set(id, request);
@@ -88,6 +91,9 @@ class RequestsStore {
       stream: req.stream,
       status: req.status,
       response: req.response,
+      tool_calls: req.tool_calls,
+      tools: req.tools,
+      tool_choice: req.tool_choice,
     };
   }
 

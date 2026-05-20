@@ -61,14 +61,14 @@ io.on('connection', (socket) => {
  * Accepts request from VS Code Continue.dev extension
  */
 app.post('/v1/chat/completions', (req, res) => {
-  const { messages, model, stream } = req.json || req.body || {};
+  const { messages, model, stream, tools, tool_choice } = req.json || req.body || {};
 
   if (!messages || !Array.isArray(messages)) {
     return res.status(400).json({ error: { message: "Invalid messages configuration" } });
   }
 
   const requestId = `req-${uuidv4().substring(0, 8)}`;
-  console.log(`[OpenAI Endpoint] Received request ${requestId} (stream: ${!!stream}, model: ${model || 'human'})`);
+  console.log(`[OpenAI Endpoint] Received request ${requestId} (stream: ${!!stream}, model: ${model || 'human'}, tools_count: ${tools ? tools.length : 0})`);
 
   // If streaming is requested, open the SSE connection immediately
   if (stream) {
@@ -83,7 +83,7 @@ app.post('/v1/chat/completions', (req, res) => {
   }
 
   // Register in-memory
-  const record = requestsStore.addRequest(requestId, messages, model || 'human-model', !!stream, res);
+  const record = requestsStore.addRequest(requestId, messages, model || 'human-model', !!stream, res, tools, tool_choice);
 
   // Broadcast the new request live to the dashboard
   io.emit('request:new', record);
@@ -123,10 +123,45 @@ app.get('/v1/models', (req, res) => {
  */
 app.post('/reply/:id', async (req, res) => {
   const { id } = req.params;
-  const { content } = req.body || {};
+  let { content, tool_calls } = req.body || {};
 
-  if (!content) {
-    return res.status(400).json({ error: "Response content is required" });
+  if (!content && (!tool_calls || tool_calls.length === 0)) {
+    return res.status(400).json({ error: "Response content or tool_calls is required" });
+  }
+
+  // Auto-detect JSON containing tool_calls or function_call if passed as content text
+  if (!tool_calls && content && content.trim().startsWith('{')) {
+    try {
+      const parsed = JSON.parse(content);
+      if (parsed.tool_calls && Array.isArray(parsed.tool_calls)) {
+        tool_calls = parsed.tool_calls;
+        content = parsed.content || null;
+      } else if (parsed.function && parsed.name) {
+        // legacy structure or shorthand
+        tool_calls = [{
+          id: parsed.id || `call_${uuidv4().substring(0, 8)}`,
+          type: "function",
+          function: {
+            name: parsed.name,
+            arguments: typeof parsed.arguments === 'object' ? JSON.stringify(parsed.arguments) : parsed.arguments
+          }
+        }];
+        content = parsed.content || null;
+      } else if (parsed.name && parsed.arguments) {
+        // simple direct tool shorthand e.g. { name: "createFile", arguments: {...} }
+        tool_calls = [{
+          id: `call_${uuidv4().substring(0, 8)}`,
+          type: "function",
+          function: {
+            name: parsed.name,
+            arguments: typeof parsed.arguments === 'object' ? JSON.stringify(parsed.arguments) : parsed.arguments
+          }
+        }];
+        content = parsed.content || null;
+      }
+    } catch (e) {
+      // Not valid JSON, continue with text content
+    }
   }
 
   const requestRecord = requestsStore.getRequest(id);
@@ -138,12 +173,13 @@ app.post('/reply/:id', async (req, res) => {
     return res.status(400).json({ error: `Request already has status '${requestRecord.status}'` });
   }
 
-  console.log(`[Reply Endpoint] Operator replied to ${id}. Streaming: ${requestRecord.stream}`);
+  console.log(`[Reply Endpoint] Operator replied to ${id}. Streaming: ${requestRecord.stream}, tool_calls: ${!!tool_calls}`);
 
   // Update in-memory state and notify dashboard
   const updatedRecord = requestsStore.updateRequest(id, {
     status: 'fulfilled',
     response: content,
+    tool_calls: tool_calls,
   });
   io.emit('request:updated', updatedRecord);
 
@@ -154,12 +190,8 @@ app.post('/reply/:id', async (req, res) => {
     // Human is typing indicator can end
     io.emit('operator:typing', { id, isTyping: false });
 
-    // Stream the human content back in chunks resembling tokens with delays
-    // We match alphanumeric words, punctuations, and space blocks
-    const chunks = content.match(/[^\s]+|\s+/g) || [content];
-    
-    try {
-      for (const chunk of chunks) {
+    if (tool_calls && tool_calls.length > 0) {
+      try {
         const payload = {
           id: `chatcmpl-${id}`,
           object: "chat.completion.chunk",
@@ -168,44 +200,90 @@ app.post('/reply/:id', async (req, res) => {
           choices: [
             {
               index: 0,
-              delta: { content: chunk },
-              finish_reason: null
+              delta: {
+                role: "assistant",
+                content: content || null,
+                tool_calls: tool_calls.map((tc, index) => ({
+                  index,
+                  id: tc.id || `call_${uuidv4().substring(0, 8)}`,
+                  type: tc.type || "function",
+                  function: {
+                    name: tc.function.name || tc.name,
+                    arguments: typeof tc.function.arguments === 'string'
+                      ? tc.function.arguments
+                      : JSON.stringify(tc.function.arguments || tc.arguments)
+                  }
+                }))
+              },
+              finish_reason: "tool_calls"
             }
           ]
         };
-        
         clientResponse.write(`data: ${JSON.stringify(payload)}\n\n`);
         
-        // Push intermediate tokens to operator dash to show real-time stream status
-        io.emit('reply:token', { id, token: chunk });
-
-        // Wait with a human typing emulation delay
-        // Shorter delays for spaces, standard for words
-        const delay = chunk.trim() === '' ? 5 : Math.max(15, Math.min(60, chunk.length * 8));
-        await new Promise((resolve) => setTimeout(resolve, delay));
+        // Push progress to operator dashboard
+        io.emit('reply:token', { id, token: `[Tool Call: ${(tool_calls[0].function && tool_calls[0].function.name) || tool_calls[0].name}]` });
+        
+        clientResponse.write('data: [DONE]\n\n');
+        clientResponse.end();
+        console.log(`[Reply Endpoint] Finished streaming tool call response for ${id}`);
+      } catch (err) {
+        console.error(`[Reply Endpoint] Error during tool call streaming: ${err.message}`);
       }
-
-      // Send the finish signal chunk
-      const finalPayload = {
-        id: `chatcmpl-${id}`,
-        object: "chat.completion.chunk",
-        created: Math.floor(Date.now() / 1000),
-        model: requestRecord.model,
-        choices: [
-          {
-            index: 0,
-            delta: {},
-            finish_reason: "stop"
-          }
-        ]
-      };
-      clientResponse.write(`data: ${JSON.stringify(finalPayload)}\n\n`);
-      clientResponse.write('data: [DONE]\n\n');
-      clientResponse.end();
+    } else {
+      // Stream the human content back in chunks resembling tokens with delays
+      // We match alphanumeric words, punctuations, and space blocks
+      const chunks = content.match(/[^\s]+|\s+/g) || [content];
       
-      console.log(`[Reply Endpoint] Finished streaming response for ${id}`);
-    } catch (err) {
-      console.error(`[Reply Endpoint] Error during streaming output: ${err.message}`);
+      try {
+        for (const chunk of chunks) {
+          const payload = {
+            id: `chatcmpl-${id}`,
+            object: "chat.completion.chunk",
+            created: Math.floor(Date.now() / 1000),
+            model: requestRecord.model,
+            choices: [
+              {
+                index: 0,
+                delta: { content: chunk },
+                finish_reason: null
+              }
+            ]
+          };
+          
+          clientResponse.write(`data: ${JSON.stringify(payload)}\n\n`);
+          
+          // Push intermediate tokens to operator dash to show real-time stream status
+          io.emit('reply:token', { id, token: chunk });
+
+          // Wait with a human typing emulation delay
+          // Shorter delays for spaces, standard for words
+          const delay = chunk.trim() === '' ? 5 : Math.max(15, Math.min(60, chunk.length * 8));
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+
+        // Send the finish signal chunk
+        const finalPayload = {
+          id: `chatcmpl-${id}`,
+          object: "chat.completion.chunk",
+          created: Math.floor(Date.now() / 1000),
+          model: requestRecord.model,
+          choices: [
+            {
+              index: 0,
+              delta: {},
+              finish_reason: "stop"
+            }
+          ]
+        };
+        clientResponse.write(`data: ${JSON.stringify(finalPayload)}\n\n`);
+        clientResponse.write('data: [DONE]\n\n');
+        clientResponse.end();
+        
+        console.log(`[Reply Endpoint] Finished streaming response for ${id}`);
+      } catch (err) {
+        console.error(`[Reply Endpoint] Error during streaming output: ${err.message}`);
+      }
     }
   } else {
     // Non-streaming completion format response
@@ -219,15 +297,27 @@ app.post('/reply/:id', async (req, res) => {
           index: 0,
           message: {
             role: "assistant",
-            content: content
+            content: content || null,
+            ...(tool_calls && tool_calls.length > 0 ? {
+              tool_calls: tool_calls.map(tc => ({
+                id: tc.id || `call_${uuidv4().substring(0, 8)}`,
+                type: tc.type || "function",
+                function: {
+                  name: tc.function.name || tc.name,
+                  arguments: typeof tc.function.arguments === 'string'
+                    ? tc.function.arguments
+                    : JSON.stringify(tc.function.arguments || tc.arguments)
+                }
+              }))
+            } : {})
           },
-          finish_reason: "stop"
+          finish_reason: tool_calls && tool_calls.length > 0 ? "tool_calls" : "stop"
         }
       ],
       usage: {
         prompt_tokens: 0,
-        completion_tokens: content.split(/\s+/).length,
-        total_tokens: content.split(/\s+/).length,
+        completion_tokens: tool_calls ? 50 : content.split(/\s+/).length,
+        total_tokens: tool_calls ? 50 : content.split(/\s+/).length,
       }
     };
     clientResponse.json(payload);

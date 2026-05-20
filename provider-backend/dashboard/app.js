@@ -41,6 +41,15 @@ const dom = {
   sendReplyBtn: document.getElementById('send-reply-btn'),
   deliveryStatus: document.getElementById('delivery-status'),
   footerApiUrl: document.getElementById('footer-api-url'),
+  toolsPanel: document.getElementById('tools-panel'),
+  toolsList: document.getElementById('tools-list'),
+  toolBuilder: document.getElementById('tool-builder'),
+  selectedToolName: document.getElementById('selected-tool-name'),
+  toolPathInput: document.getElementById('tool-path-input'),
+  toolParamsInput: document.getElementById('tool-params-input'),
+  toolContentInput: document.getElementById('tool-content-input'),
+  toolCancelBuilderBtn: document.getElementById('tool-cancel-builder-btn'),
+  toolGenerateJsonBtn: document.getElementById('tool-generate-json-btn'),
 };
 
 // Map current URL to standard output
@@ -322,6 +331,32 @@ function renderActivePanel(req) {
       dom.activeBadgeStatus.className = 'px-2 py-0.5 rounded-md text-[10px] font-mono tracking-wider font-semibold uppercase bg-red-500/10 text-red-400 border border-red-500/10';
       dom.deliveryStatus.textContent = 'Request timed out after waiting 10 minutes.';
     }
+  }
+
+  // Handle tools display
+  if (req.tools && req.tools.length > 0 && req.status === 'pending') {
+    dom.toolsPanel.classList.remove('hidden');
+    dom.toolsList.innerHTML = '';
+    
+    req.tools.forEach(tool => {
+      const toolName = (tool.function && tool.function.name) || tool.name;
+      const toolDesc = (tool.function && tool.function.description) || tool.description || 'No description';
+      
+      const badge = document.createElement('button');
+      badge.type = 'button';
+      badge.className = 'px-2.5 py-1 text-xs bg-slate-900 hover:bg-slate-800 text-indigo-300 hover:text-indigo-200 border border-indigo-500/10 hover:border-indigo-400/40 rounded-lg font-mono font-medium transition-all cursor-pointer flex items-center gap-1';
+      badge.innerHTML = `<i data-lucide="cog" class="w-3.5 h-3.5 text-indigo-400"></i> <span>${toolName}</span>`;
+      badge.title = toolDesc;
+      
+      badge.addEventListener('click', () => {
+        openToolBuilder(tool);
+      });
+      
+      dom.toolsList.appendChild(badge);
+    });
+  } else {
+    dom.toolsPanel.classList.add('hidden');
+    dom.toolBuilder.classList.add('hidden');
   }
 
   // Populate Messages
@@ -673,6 +708,81 @@ const triggerSimulation = async () => {
 
 document.getElementById('header-simulate-btn').addEventListener('click', triggerSimulation);
 document.getElementById('simulate-empty-btn').addEventListener('click', triggerSimulation);
+
+/**
+ * Interactive Tool Form Builder Helpers & Event Bindings
+ */
+function openToolBuilder(tool) {
+  const toolName = (tool.function && tool.function.name) || tool.name || 'customTool';
+  dom.selectedToolName.textContent = toolName;
+  dom.toolBuilder.classList.remove('hidden');
+  
+  // Set values & placeholders based on common naming patterns
+  dom.toolPathInput.value = '';
+  dom.toolParamsInput.value = '';
+  dom.toolContentInput.value = '';
+  
+  if (toolName.toLowerCase().includes('file')) {
+    dom.toolPathInput.placeholder = "e.g. src/App.tsx";
+    dom.toolContentInput.placeholder = "Write or edit the file code inside this block...";
+  } else if (toolName.toLowerCase().includes('command') || toolName.toLowerCase().includes('exec') || toolName.toLowerCase().includes('terminal')) {
+    dom.toolPathInput.placeholder = "e.g. npm run build";
+    dom.toolContentInput.placeholder = "Enter shell command parameters or input...";
+  } else {
+    dom.toolPathInput.placeholder = "main argument (e.g. path, command)";
+    dom.toolContentInput.placeholder = "Enter tool argument details or body code here...";
+  }
+}
+
+dom.toolCancelBuilderBtn.addEventListener('click', () => {
+  dom.toolBuilder.classList.add('hidden');
+});
+
+dom.toolGenerateJsonBtn.addEventListener('click', () => {
+  const toolName = dom.selectedToolName.textContent;
+  const pathVal = dom.toolPathInput.value.trim();
+  const paramsVal = dom.toolParamsInput.value.trim();
+  const contentVal = dom.toolContentInput.value;
+  
+  if (!toolName) {
+    showToast('Please select an active tool badge first!', 'warning');
+    return;
+  }
+  
+  if (dom.replyTextarea.disabled) {
+    showToast('Cannot generate tool payload for a resolved request!', 'warning');
+    return;
+  }
+  
+  const args = {};
+  if (pathVal) {
+    args.path = pathVal;
+  }
+  
+  if (paramsVal) {
+    try {
+      const parsed = JSON.parse(paramsVal);
+      Object.assign(args, parsed);
+    } catch (e) {
+      args.options = paramsVal;
+    }
+  }
+  
+  if (contentVal) {
+    args.content = contentVal;
+  }
+  
+  const payload = {
+    name: toolName,
+    arguments: args
+  };
+  
+  dom.replyTextarea.value = JSON.stringify(payload, null, 2);
+  updateStatsCounter();
+  
+  showToast(`Shorthand JSON payload for ${toolName} constructed!`, 'success');
+  dom.toolBuilder.classList.add('hidden');
+});
 
 /**
  * Quality-of-life UI sounds & events helpers
