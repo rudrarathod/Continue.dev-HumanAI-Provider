@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { requestsStore } from './requests.js';
+import { GoogleGenAI } from '@google/genai';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -244,6 +245,116 @@ app.post('/typing/:id', (req, res) => {
   const { isTyping } = req.body || {};
   io.emit('operator:typing', { id, isTyping: !!isTyping });
   res.sendStatus(200);
+});
+
+/**
+ * Endpoint 4: Get smart response draft suggestions from Gemini
+ * Uses the available GEMINI_API_KEY with the @google/genai SDK
+ */
+app.post('/api/gemini/suggest', async (req, res) => {
+  const { messages } = req.body || {};
+  
+  if (!messages || !Array.isArray(messages)) {
+    return res.status(400).json({ error: "No messages context provided" });
+  }
+
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
+    return res.status(503).json({ error: "Gemini API key is not configured in Secrets. Configure it in secrets to get replies auto-drafted." });
+  }
+
+  try {
+    const ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
+
+    // Format the conversation history for Gemini
+    const userPrompt = messages.filter(m => m.role === 'user').map(m => m.content).join('\n\n');
+    const fullConversation = messages.map(m => `[${m.role.toUpperCase()}]: ${m.content}`).join('\n');
+
+    const promptText = `You are a helpful and professional AI Co-Operator assisting a human software operator inside an editing console.
+The user is requesting help with code or a generic technical prompt.
+Please analyze the following conversation context and provide a highly useful, accurate, and complete programming or technical response draft that writing operators can use directly.
+Keep your response concise but extremely helpful, providing well-formatted code blocks where appropriate. Do NOT add any conversational meta-text like "Here is your response draft:" or conversational preamble. Start directly with the suggested answer/code.
+
+CONTEXT CONVERSATION:
+${fullConversation}
+
+PROMPT DEFINITION:
+${userPrompt}`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: promptText,
+    });
+
+    const suggestion = response.text || "";
+    return res.json({ status: 'success', suggestion });
+  } catch (error) {
+    console.error(`[Gemini Engine] Error generating draft: ${error.message}`);
+    return res.status(500).json({ error: `Gemini suggestion failed: ${error.message}` });
+  }
+});
+
+/**
+ * Endpoint 5: Interactive Simulator for sandbox prototyping
+ * Generates mock pending developer requests inside the console queue
+ */
+app.post('/api/simulate', (req, res) => {
+  const demoPrompts = [
+    {
+      messages: [
+        { role: "user", content: "Can you write an elegant React counter component? Use Tailwind CSS to style it beautifully. Make it use simple states and display buttons to increment and decrement." }
+      ],
+      model: "react-sandbox"
+    },
+    {
+      messages: [
+        { role: "user", content: "Write a high-performance Python function that calculates the nth Fibonacci number. Use dynamic programming with memoization, and add type hints." }
+      ],
+      model: "python-runner"
+    },
+    {
+      messages: [
+        { role: "user", content: "How do I configure a basic multi-stage Dockerfile for a NestJS application to reduce image size? Explain why each stage is used." }
+      ],
+      model: "docker-agent"
+    },
+    {
+      messages: [
+        { role: "user", content: "The following TypeScript code has a bug where it throws an error 'Cannot read properties of undefined (reading 'map')'. Why? How can I fix it?\n\n```typescript\ninterface Box {\n  items?: string[];\n}\n\nfunction renderBox(box: Box) {\n  return box.items.map(it => `<li>\${it}</li>`);\n}\n```" }
+      ],
+      model: "bug-finder"
+    }
+  ];
+
+  // Pick a random prompt
+  const randomIndex = Math.floor(Math.random() * demoPrompts.length);
+  const selected = demoPrompts[randomIndex];
+  
+  const requestId = `demo-${uuidv4().substring(0, 8)}`;
+  console.log(`[Simulator] Spawning demo request \${requestId}`);
+
+  // Create mock streaming response object
+  const mockRes = {
+    write: (data) => console.log(`[Demo Client \${requestId}] \${data}`),
+    writeHead: () => {},
+    end: () => console.log(`[Demo Client \${requestId}] Stream ended`),
+    status: function() { return this; },
+    json: () => {},
+  };
+
+  const record = requestsStore.addRequest(requestId, selected.messages, selected.model, true, mockRes);
+  
+  // Broadcast live via Socket.IO
+  io.emit('request:new', record);
+
+  res.json({ status: 'success', message: 'Demo request simulated successfully!', request: record });
 });
 
 // Capture global port listener

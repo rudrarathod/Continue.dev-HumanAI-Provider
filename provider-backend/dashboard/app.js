@@ -326,13 +326,13 @@ function renderActivePanel(req) {
 
   // Populate Messages
   dom.activeMessages.innerHTML = '';
-  req.messages.forEach(m => {
+  req.messages.forEach((m, idx) => {
     const isUser = m.role === 'user';
     const msgBlock = document.createElement('div');
     
     msgBlock.className = isUser 
-      ? 'bg-[#11192e] border border-slate-800/80 p-3.5 rounded-xl space-y-1'
-      : 'bg-indigo-950/20 border border-indigo-900/30 p-3.5 rounded-xl space-y-1';
+      ? 'bg-[#11192e] border border-slate-800/80 p-3.5 rounded-xl space-y-1.5 relative group'
+      : 'bg-indigo-950/20 border border-indigo-900/30 p-3.5 rounded-xl space-y-1.5 relative group';
 
     const roleName = isUser ? 'User Prompt' : 'Context Assistant';
     const roleIcon = isUser ? 'user' : 'bot';
@@ -342,14 +342,25 @@ function renderActivePanel(req) {
     const htmlContent = marked.parse(m.content || '');
 
     msgBlock.innerHTML = `
-      <div class="flex items-center space-x-1.5 text-xs ${badgeColor} font-mono font-medium mb-1">
-        <i data-lucide="${roleIcon}" class="w-3.5 h-3.5"></i>
-        <span>${roleName}</span>
+      <div class="flex items-center justify-between mb-1">
+        <div class="flex items-center space-x-1.5 text-xs ${badgeColor} font-mono font-medium">
+          <i data-lucide="${roleIcon}" class="w-3.5 h-3.5"></i>
+          <span>${roleName}</span>
+        </div>
+        <button class="msg-copy-btn px-2 py-0.5 text-[9px] font-mono text-slate-400 hover:text-indigo-400 border border-transparent hover:border-indigo-500/20 hover:bg-indigo-500/5 rounded opacity-0 group-hover:opacity-100 transition-all flex items-center gap-1 cursor-pointer" data-idx="${idx}">
+          <i data-lucide="copy" class="w-2.5 h-2.5"></i>
+          <span>Copy</span>
+        </button>
       </div>
       <div class="markdown-body text-xs text-slate-300 overflow-x-auto">
         ${htmlContent}
       </div>
     `;
+
+    // Hook copy segment
+    msgBlock.querySelector('.msg-copy-btn').addEventListener('click', (e) => {
+      copyToClipboard(m.content || '', e.currentTarget);
+    });
 
     dom.activeMessages.appendChild(msgBlock);
   });
@@ -440,7 +451,7 @@ dom.sendReplyBtn.addEventListener('click', async () => {
   const id = state.selectedId;
 
   if (!id || !content) {
-    alert('Please enter a response message before dispatching!');
+    showToast('Please enter a response message before dispatching!', 'warning');
     return;
   }
 
@@ -459,19 +470,209 @@ dom.sendReplyBtn.addEventListener('click', async () => {
     const parsed = await response.json();
     if (response.ok) {
       dom.deliveryStatus.textContent = 'Reply synced and streaming!';
+      showToast('Response successfully synced and streaming to client!', 'success');
     } else {
       dom.deliveryStatus.textContent = `Error: ${parsed.error || 'Failed to dispatch'}`;
+      showToast(`Dispatch failed: ${parsed.error || 'unspecified server error'}`, 'error');
       dom.sendReplyBtn.disabled = false;
       dom.sendReplyBtn.innerHTML = '<i data-lucide="send" class="w-3.5 h-3.5"></i> <span>Dispatch Response</span>';
       lucide.createIcons();
     }
   } catch (error) {
     dom.deliveryStatus.textContent = 'Network offline or server died.';
+    showToast('Network offline or operator backend is not responding.', 'error');
     dom.sendReplyBtn.disabled = false;
     dom.sendReplyBtn.innerHTML = '<i data-lucide="send" class="w-3.5 h-3.5"></i> <span>Dispatch Response</span>';
     lucide.createIcons();
   }
 });
+
+/**
+ * Custom Non-Blocking Toast Notification System
+ */
+function showToast(message, type = 'info') {
+  const toast = document.getElementById('toast-notification');
+  const msgEl = document.getElementById('toast-message');
+  const iconEl = document.getElementById('toast-icon');
+  const iconInner = document.getElementById('toast-icon-inner');
+
+  if (!toast || !msgEl || !iconEl || !iconInner) return;
+
+  msgEl.textContent = message;
+
+  // Set visual theme matching status type
+  if (type === 'success') {
+    iconEl.className = 'p-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 border border-emerald-500/25';
+    iconInner.setAttribute('data-lucide', 'check-circle');
+  } else if (type === 'error') {
+    iconEl.className = 'p-1.5 rounded-lg bg-red-500/15 text-red-400 border border-red-500/25';
+    iconInner.setAttribute('data-lucide', 'alert-circle');
+  } else if (type === 'warning') {
+    iconEl.className = 'p-1.5 rounded-lg bg-amber-500/15 text-amber-500 border border-amber-500/25';
+    iconInner.setAttribute('data-lucide', 'alert-triangle');
+  } else {
+    iconEl.className = 'p-1.5 rounded-lg bg-indigo-500/15 text-indigo-400 border border-indigo-500/25';
+    iconInner.setAttribute('data-lucide', 'info');
+  }
+  
+  lucide.createIcons();
+
+  // Animate toast entry
+  toast.classList.remove('opacity-0', 'pointer-events-none', 'translate-y-2');
+  toast.classList.add('opacity-100', 'translate-y-0');
+
+  // Dismiss automatically after 4 seconds
+  if (window.toastTimeout) clearTimeout(window.toastTimeout);
+  window.toastTimeout = setTimeout(dismissToast, 4000);
+}
+
+function dismissToast() {
+  const toast = document.getElementById('toast-notification');
+  if (toast) {
+    toast.classList.add('opacity-0', 'pointer-events-none');
+    toast.classList.remove('opacity-100');
+  }
+}
+
+document.getElementById('toast-close').addEventListener('click', dismissToast);
+
+/**
+ * Robust Clipboard Utility with Fallback for sandboxed iFrames
+ */
+function copyToClipboard(text, buttonElement) {
+  const originalHTML = buttonElement.innerHTML;
+  
+  const performCopySuccess = () => {
+    buttonElement.innerHTML = '<i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400"></i> <span class="text-emerald-400 font-bold">Copied!</span>';
+    lucide.createIcons();
+    showToast('Copied to clipboard successfully!', 'success');
+    
+    setTimeout(() => {
+      buttonElement.innerHTML = originalHTML;
+      lucide.createIcons();
+    }, 2000);
+  };
+
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text)
+      .then(performCopySuccess)
+      .catch(() => fallbackCopy(text, performCopySuccess));
+  } else {
+    fallbackCopy(text, performCopySuccess);
+  }
+}
+
+function fallbackCopy(text, successCallback) {
+  const textArea = document.createElement("textarea");
+  textArea.value = text;
+  textArea.style.top = "0";
+  textArea.style.left = "0";
+  textArea.style.position = "fixed";
+  textArea.style.opacity = "0";
+  document.body.appendChild(textArea);
+  textArea.focus();
+  textArea.select();
+  try {
+    const successful = document.execCommand('copy');
+    if (successful) {
+      successCallback();
+    } else {
+      showToast('Unable to copy text. Please select and copy manually.', 'error');
+    }
+  } catch (err) {
+    console.error('Fallback copy failed', err);
+    showToast('Browser blocked copy operation.', 'error');
+  }
+  document.body.removeChild(textArea);
+}
+
+/**
+ * Handle Full Context copying
+ */
+document.getElementById('copy-full-context-btn').addEventListener('click', (e) => {
+  const activeReq = state.history.find(r => r.id === state.selectedId);
+  if (!activeReq) {
+    showToast('Please select a valid request first!', 'warning');
+    return;
+  }
+  
+  // Format prompt exchange elegantly as Markdown
+  const formattedPrompt = activeReq.messages.map(m => `### ${m.role === 'user' ? 'Developer Prompt' : 'Assistant Context'}\n\n${m.content}`).join('\n\n');
+  copyToClipboard(formattedPrompt, e.currentTarget);
+});
+
+/**
+ * Handle Suggest Response with Gemini AI model
+ */
+document.getElementById('gemini-draft-btn').addEventListener('click', async (e) => {
+  const id = state.selectedId;
+  const activeReq = state.history.find(r => r.id === id);
+  
+  if (!id || !activeReq) {
+    showToast('Please select an active queue request to generate a reply draft!', 'warning');
+    return;
+  }
+
+  const draftBtn = e.currentTarget;
+  if (draftBtn.disabled) return;
+
+  draftBtn.disabled = true;
+  const originalHTML = draftBtn.innerHTML;
+  draftBtn.innerHTML = '<i data-lucide="loader" class="w-3.5 h-3.5 animate-spin text-purple-400"></i> <span>Formulating Draft...</span>';
+  lucide.createIcons();
+  
+  showToast('Invoking server-side Gemini 3.5 Assistant...', 'info');
+
+  try {
+    const response = await fetch('/api/gemini/suggest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: activeReq.messages }),
+    });
+
+    const data = await response.json();
+    if (response.ok) {
+      if (dom.replyTextarea.disabled) {
+        showToast('Active request session is already resolved or closed!', 'warning');
+      } else {
+        dom.replyTextarea.value = data.suggestion || '';
+        updateStatsCounter();
+        showToast('Gemini suggested response draft loaded!', 'success');
+        dom.replyTextarea.focus();
+      }
+    } else {
+      showToast(data.error || 'Failed to formulate suggestion draft.', 'error');
+    }
+  } catch (err) {
+    showToast('Failed to reach AI Suggestion module.', 'error');
+  } finally {
+    draftBtn.disabled = false;
+    draftBtn.innerHTML = originalHTML;
+    lucide.createIcons();
+  }
+});
+
+/**
+ * Hook up Sandbox Simulation requests
+ */
+const triggerSimulation = async () => {
+  try {
+    showToast('Simulating developer prompt injection...', 'info');
+    const response = await fetch('/api/simulate', { method: 'POST' });
+    const data = await response.json();
+    
+    if (response.ok) {
+      showToast('Demo prompt registered in active queue successfully!', 'success');
+    } else {
+      showToast(`Simulation Error: ${data.error || 'unspecified error'}`, 'error');
+    }
+  } catch (err) {
+    showToast('Failed to connect to simulation server endpoint.', 'error');
+  }
+};
+
+document.getElementById('header-simulate-btn').addEventListener('click', triggerSimulation);
+document.getElementById('simulate-empty-btn').addEventListener('click', triggerSimulation);
 
 /**
  * Quality-of-life UI sounds & events helpers
