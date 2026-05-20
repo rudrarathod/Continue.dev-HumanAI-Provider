@@ -1,0 +1,10 @@
+# Continue.dev Configuration Example for VS Code / JetBrains IDE
+# Paste this in your ~/.continue/config.json file.
+# Replace http://localhost:3000/v1 with your live server URL or deployed URL if hosted on Cloud Run.
+
+models:
+  - name: HumanAI
+    provider: openai
+    model: human-model
+    apiBase: http://localhost:3000/v1
+    apiKey: dummy

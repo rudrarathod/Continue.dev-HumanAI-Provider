@@ -1,0 +1,8 @@
+{
+  "name": "Remix: Continue.dev Human AI Provider",
+  "description": "An OpenAI-compatible AI provider server and realtime operator dashboard for Continue.dev that routes AI requests to a human for manual streaming replies.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

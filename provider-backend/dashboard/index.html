@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en" class="dark scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Operator Dash | Continue.dev Human Provider</title>
+  
+  <!-- Inter & Space Grotesk fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            display: ['Space Grotesk', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+  
+  <!-- Marked Markdown Parser -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  
+  <!-- Custom Syle Rules CSS -->
+  <link rel="stylesheet" href="styles.css">
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    /* Premium custom scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0f172a; 
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155; 
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #475569; 
+    }
+    .custom-glow {
+      box-shadow: 0 0 20px -3px rgba(99, 102, 241, 0.15);
+    }
+    .accent-glow {
+      box-shadow: 0 0 30px -5px rgba(99, 102, 241, 0.4);
+    }
+  </style>
+</head>
+<body class="bg-[#0b0f19] text-slate-100 font-sans min-h-screen flex flex-col antialiased selection:bg-indigo-500/30 selection:text-white">
+
+  <!-- Header Section -->
+  <header class="border-b border-slate-800/80 bg-[#0d1321]/90 backdrop-blur-md sticky top-0 z-50 px-6 py-4 flex items-center justify-between">
+    <div class="flex items-center space-x-3">
+      <div class="h-10 w-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-violet-600 to-indigo-400 flex items-center justify-center shadow-lg shadow-indigo-600/20">
+        <i data-lucide="terminal" class="h-5.5 w-5.5 text-white"></i>
+      </div>
+      <div>
+        <h1 class="font-display font-bold text-lg tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-400 bg-clip-text text-transparent">
+          Human AI Provider
+        </h1>
+        <p class="text-xs text-indigo-400/80 font-mono tracking-wider flex items-center gap-1.5">
+          <span class="relative flex h-2 w-2">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+          </span>
+          CONTINUE.DEV OPERATOR CONSOLE
+        </p>
+      </div>
+    </div>
+    
+    <div class="flex items-center space-x-4">
+      <div id="connection-badge" class="px-3 py-1.5 rounded-full text-xs font-mono font-medium border border-red-500/20 bg-red-500/10 text-red-400 flex items-center gap-1.5 transition-all duration-300">
+        <i data-lucide="wifi-off" class="w-3.5 h-3.5"></i>
+        <span>DISCONNECTED</span>
+      </div>
+      
+      <div class="text-xs text-slate-400 border border-slate-800 rounded-lg px-2.5 py-1.5 bg-slate-900/60 hidden md:flex items-center gap-2">
+        <i data-lucide="clock" class="w-3.5 h-3.5 text-slate-500"></i>
+        <span class="font-mono" id="system-time">23:08:33 UTC</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Grid Workspace -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+    
+    <!-- Left Column: Request List Queue (5 cols of 12) -->
+    <section class="lg:col-span-5 flex flex-col space-y-4 h-[calc(100vh-140px)] min-h-[500px]">
+      
+      <!-- Stats Summary Banner -->
+      <div class="bg-gradient-to-r from-[#111827] to-[#0f172a] border border-slate-800/80 rounded-2xl p-4 flex items-center justify-between custom-glow">
+        <div class="flex items-center space-x-3">
+          <div class="p-2 rounded-lg bg-orange-500/15 text-orange-400 border border-orange-500/25">
+            <i data-lucide="clock-3" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <div class="text-2xl font-bold font-display" id="queue-count">0</div>
+            <div class="text-[11px] text-slate-400 font-mono tracking-wider uppercase">Active Queue</div>
+          </div>
+        </div>
+        
+        <div class="h-8 w-px bg-slate-800"></div>
+
+        <div class="flex items-center space-x-3">
+          <div class="p-2 rounded-lg bg-indigo-500/15 text-indigo-400 border border-indigo-500/25">
+            <i data-lucide="badge-check" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <div class="text-2xl font-bold font-display" id="fulfilled-count">0</div>
+            <div class="text-[11px] text-slate-400 font-mono tracking-wider uppercase">Fulfilled</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Queue Header with Filters -->
+      <div class="flex items-center justify-between">
+        <h2 class="font-display font-semibold text-sm tracking-wide text-indigo-300 flex items-center gap-2 uppercase">
+          <i data-lucide="list-ordered" class="w-4 h-4 text-indigo-400"></i>
+          Request Queue
+        </h2>
+        <div class="flex space-x-1 border border-slate-800 p-0.5 rounded-lg bg-slate-900/60 text-xs text-slate-400">
+          <button id="filter-all" class="px-2.5 py-1 rounded bg-slate-800 text-slate-100 font-medium transition-all">All</button>
+          <button id="filter-pending" class="px-2.5 py-1 rounded hover:text-slate-100 transition-all">Pending</button>
+        </div>
+      </div>
+
+      <!-- Queue List Scroll -->
+      <div class="flex-1 overflow-y-auto border border-slate-800/80 bg-[#0d1321]/40 rounded-2xl p-2.5 space-y-2.5" id="request-list">
+        <!-- Empty State -->
+        <div class="h-full flex flex-col items-center justify-center text-center p-6" id="empty-state">
+          <div class="h-16 w-16 bg-slate-900/80 border border-slate-800/70 rounded-2xl flex items-center justify-center mb-4 text-indigo-400/40 relative">
+            <i data-lucide="inbox" class="w-8 h-8"></i>
+            <span class="absolute top-1 right-1 flex h-2.5 w-2.5">
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-60"></span>
+              <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-indigo-500"></span>
+            </span>
+          </div>
+          <h3 class="font-display font-semibold text-slate-300">Awaiting Requests</h3>
+          <p class="text-xs text-slate-500 mt-1 max-w-[240px] leading-relaxed">Send a prompt from VS Code's Continue extension to populate this queue.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right Column: Interactive Playground / Reply Deck (7 cols of 12) -->
+    <section class="lg:col-span-7 flex flex-col space-y-4 h-[calc(100vh-140px)] min-h-[500px]" id="reply-container">
+      
+      <!-- Interactive Frame Fallback (Hidden till item selected) -->
+      <div id="no-selection-state" class="flex-1 border border-dashed border-slate-800 bg-[#0d1321]/15 rounded-3xl flex flex-col items-center justify-center p-8 text-center">
+        <div class="h-14 w-14 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-center mb-4 text-indigo-500/60">
+          <i data-lucide="layout-dashboard" class="w-7 h-7"></i>
+        </div>
+        <h3 class="font-display font-semibold text-slate-200">No Request Selected</h3>
+        <p class="text-xs text-slate-500 mt-1.5 max-w-xs leading-relaxed">
+          Select an active prompt from the queue on the left to write a custom human reply or review history.
+        </p>
+      </div>
+
+      <!-- Action Panel (Visible when item selected) -->
+      <div id="active-panel" class="flex-1 flex flex-col space-y-4 hidden h-full">
+        
+        <!-- User Request Card -->
+        <div id="user-request-card" class="bg-[#0e1626]/80 border border-slate-800 rounded-2xl p-4 overflow-y-auto max-h-[40%] flex flex-col custom-glow">
+          <div class="flex items-center justify-between mb-3 border-b border-slate-800/50 pb-2.5">
+            <div class="flex items-center space-x-2">
+              <span id="active-badge-status" class="px-2 py-0.5 rounded-md text-[10px] font-mono tracking-wider font-semibold uppercase"></span>
+              <span id="active-id" class="text-xs font-mono text-slate-400 font-medium"></span>
+            </div>
+            
+            <div class="flex items-center space-x-1.5 text-xs text-slate-400 font-mono">
+              <i data-lucide="cpu" class="w-3.5 h-3.5 text-indigo-400"></i>
+              <span id="active-model"></span>
+              <span class="text-slate-600">|</span>
+              <span id="active-stream-badge" class="flex items-center gap-1"></span>
+            </div>
+          </div>
+          
+          <!-- Conversation stream -->
+          <div id="active-messages" class="flex-1 space-y-4 text-sm scroll-smooth">
+            <!-- Rendered prompts from messages go here -->
+          </div>
+        </div>
+
+        <!-- Human Compose Reply Card -->
+        <div class="flex-1 bg-[#0d1424] border border-slate-800/80 rounded-2xl p-4 flex flex-col min-h-[300px] justify-between relative overflow-hidden">
+          
+          <!-- Blur background highlights -->
+          <div class="absolute -top-12 -right-12 w-32 h-32 bg-indigo-600/10 blur-3xl pointer-events-none"></div>
+          <div class="absolute -bottom-12 -left-12 w-32 h-32 bg-violet-600/5 blur-3xl pointer-events-none"></div>
+          
+          <div class="z-10 flex flex-col flex-1">
+            <div class="flex items-center justify-between mb-2">
+              <h3 class="font-display font-semibold text-xs tracking-wider uppercase text-slate-400/90 flex items-center gap-1.5">
+                <i data-lucide="pen-tool" class="w-4 h-4 text-indigo-400"></i>
+                Compose AI Response
+              </h3>
+              
+              <div id="typing-indicator" class="text-[11px] font-mono text-indigo-300 font-medium bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-md flex items-center gap-1.5 transition-all opacity-0 duration-300">
+                <span class="flex space-x-0.5 items-center">
+                  <span class="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style="animation-delay: 0ms"></span>
+                  <span class="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style="animation-delay: 150ms"></span>
+                  <span class="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style="animation-delay: 300ms"></span>
+                </span>
+                Typing status live...
+              </div>
+            </div>
+
+            <!-- Response editor text-area -->
+            <div class="relative flex-1 flex flex-col mt-2">
+              <textarea 
+                id="reply-textarea"
+                class="w-full flex-1 bg-slate-950/70 border border-slate-800/90 hover:border-slate-800 focus:border-indigo-500/80 rounded-xl p-3.5 text-sm text-slate-100 placeholder-slate-500/80 focus:outline-none focus:ring-1 focus:ring-indigo-500/20 transition-all font-mono resize-none"
+                placeholder="Write clear manual responses, instructions or code fixes..."
+              ></textarea>
+              
+              <!-- Live character / word stats floating -->
+              <div class="absolute bottom-3 right-3 text-[10px] font-mono text-slate-500 bg-[#0f172a]/90 backdrop-blur border border-slate-800/80 rounded px-2 py-1 flex items-center gap-2">
+                <span>Words: <strong class="text-slate-300" id="stat-words">0</strong></span>
+                <span class="text-slate-800">|</span>
+                <span>Chars: <strong class="text-slate-300" id="stat-chars">0</strong></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Shortcuts/Templates Quick Deck -->
+          <div class="z-10 mt-4 border-t border-slate-800/50 pt-3">
+            <span class="text-[10px] font-mono tracking-wider text-slate-500 uppercase block mb-1.5">Quick Templates</span>
+            <div class="flex flex-wrap gap-1.5" id="presets-container">
+              <button class="preset-btn px-2.5 py-1 text-xs bg-slate-900 border border-slate-800 hover:border-indigo-500/30 text-slate-300 rounded-lg hover:text-white transition-all">
+                Sure, I can fix that React code...
+              </button>
+              <button class="preset-btn px-2.5 py-1 text-xs bg-slate-900 border border-slate-800 hover:border-indigo-500/30 text-slate-300 rounded-lg hover:text-white transition-all">
+                Let's inspect this trace...
+              </button>
+              <button class="preset-btn px-2.5 py-1 text-xs bg-slate-900 border border-slate-800 hover:border-indigo-500/30 text-slate-300 rounded-lg hover:text-white transition-all">
+                The syntax error on line...
+              </button>
+              <button class="preset-btn px-2.5 py-1 text-xs bg-slate-900 border border-slate-800 hover:border-indigo-500/30 text-slate-300 rounded-lg hover:text-white transition-all">
+                Happy to explain how...
+              </button>
+            </div>
+          </div>
+
+          <!-- Action Buttons / Delivery Row -->
+          <div class="z-10 flex items-center justify-between border-t border-slate-800/50 pt-3.5 mt-3">
+            <div class="text-xs text-slate-500 italic max-w-[240px]" id="delivery-status">
+              Ready to send.
+            </div>
+
+            <div class="flex space-x-3">
+              <button
+                id="cancel-reply-btn"
+                class="px-4 py-2 text-xs bg-slate-900/60 text-slate-400 border border-slate-800 hover:bg-slate-900 hover:text-slate-200 hover:border-slate-700/80 rounded-xl transition-all"
+              >
+                Clear
+              </button>
+              <button
+                id="send-reply-btn"
+                class="px-5 py-2 text-xs font-semibold bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white rounded-xl flex items-center gap-2 shadow-lg hover:shadow-indigo-500/20 active-glow transition-all"
+              >
+                <i data-lucide="send" class="w-3.5 h-3.5"></i>
+                <span>Dispatch Response</span>
+              </button>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- Bottom Interactive Connection Config Info Footer -->
+  <footer class="border-t border-slate-950/80 bg-[#080c14] py-4 px-6 flex flex-col md:flex-row gap-4 items-center justify-between text-xs text-slate-500">
+    <div class="flex items-center space-x-2">
+      <i data-lucide="info" class="w-4 h-4 text-indigo-400/60"></i>
+      <span>Add this model to your local <strong>config.json</strong> file in <code class="bg-[#0b0e14] text-slate-300 px-1.5 py-0.5 rounded border border-slate-800 font-mono">~/.continue/config.json</code></span>
+    </div>
+    <div class="flex space-x-3 font-mono text-[10px]">
+      <span class="text-slate-600">URL Target:</span>
+      <span class="text-indigo-400 selection:bg-indigo-500/50" id="footer-api-url">http://localhost:3000/v1</span>
+    </div>
+  </footer>
+
+  <!-- Socket.IO library from client CDN as it maps locally fallback -->
+  <script src="/socket.io/socket.io.js"></script>
+
+  <!-- Load Dashboard Logic -->
+  <script src="app.js"></script>
+</body>
+</html>
