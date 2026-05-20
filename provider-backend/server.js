@@ -129,15 +129,69 @@ app.post('/reply/:id', async (req, res) => {
     return res.status(400).json({ error: "Response content or tool_calls is required" });
   }
 
-  // Auto-detect JSON containing tool_calls or function_call if passed as content text
-  if (!tool_calls && content && content.trim().startsWith('{')) {
+  // Robust JSON extractor to handle Markdown block headers and stray conversational text
+  function extractJson(text) {
+    if (!text) return null;
+    let target = text.trim();
+    
+    // 1. Strip markdown fences if present (either ```json or ```)
+    const mdMatch = target.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+    if (mdMatch) {
+      target = mdMatch[1].trim();
+    } else {
+      // Look for a code block inside the text
+      const insideMdMatch = target.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+      if (insideMdMatch) {
+        target = insideMdMatch[1].trim();
+      }
+    }
+
+    // 2. If it doesn't start with JSON brackets, find bracket boundaries
+    if (!target.startsWith('{') && !target.startsWith('[')) {
+      const startIdx = target.indexOf('{');
+      const endIdx = target.lastIndexOf('}');
+      const startArrIdx = target.indexOf('[');
+      const endArrIdx = target.lastIndexOf(']');
+      
+      let bestStart = -1;
+      let bestEnd = -1;
+      
+      if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+        bestStart = startIdx;
+        bestEnd = endIdx + 1;
+      }
+      if (startArrIdx !== -1 && endArrIdx !== -1 && endArrIdx > startArrIdx) {
+        if (bestStart === -1 || startArrIdx < bestStart) {
+          bestStart = startArrIdx;
+          bestEnd = endArrIdx + 1;
+        }
+      }
+      
+      if (bestStart !== -1 && bestEnd !== -1) {
+        target = target.substring(bestStart, bestEnd);
+      }
+    }
+
     try {
-      const parsed = JSON.parse(content);
-      if (parsed.tool_calls && Array.isArray(parsed.tool_calls)) {
+      return JSON.parse(target);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Auto-detect JSON or Markdown-wrapped JSON containing tool_calls, shorthand functions, etc.
+  if (!tool_calls && content) {
+    const parsed = extractJson(content);
+    if (parsed) {
+      if (Array.isArray(parsed)) {
+        // Direct array of tool calls
+        tool_calls = parsed;
+        content = null;
+      } else if (parsed.tool_calls && Array.isArray(parsed.tool_calls)) {
         tool_calls = parsed.tool_calls;
         content = parsed.content || null;
       } else if (parsed.function && parsed.name) {
-        // legacy structure or shorthand
+        // Shorthand for a tool call (e.g. { name: "...", function: {...} })
         tool_calls = [{
           id: parsed.id || `call_${uuidv4().substring(0, 8)}`,
           type: "function",
@@ -148,7 +202,7 @@ app.post('/reply/:id', async (req, res) => {
         }];
         content = parsed.content || null;
       } else if (parsed.name && parsed.arguments) {
-        // simple direct tool shorthand e.g. { name: "createFile", arguments: {...} }
+        // Direct single tool shorthand (e.g. { name: "createFile", arguments: {...} })
         tool_calls = [{
           id: `call_${uuidv4().substring(0, 8)}`,
           type: "function",
@@ -159,8 +213,6 @@ app.post('/reply/:id', async (req, res) => {
         }];
         content = parsed.content || null;
       }
-    } catch (e) {
-      // Not valid JSON, continue with text content
     }
   }
 
@@ -192,7 +244,8 @@ app.post('/reply/:id', async (req, res) => {
 
     if (tool_calls && tool_calls.length > 0) {
       try {
-        const payload = {
+        // Chunk 1: Send tool call data delta with finish_reason: null
+        const payload1 = {
           id: `chatcmpl-${id}`,
           object: "chat.completion.chunk",
           created: Math.floor(Date.now() / 1000),
@@ -215,11 +268,27 @@ app.post('/reply/:id', async (req, res) => {
                   }
                 }))
               },
+              finish_reason: null
+            }
+          ]
+        };
+        clientResponse.write(`data: ${JSON.stringify(payload1)}\n\n`);
+
+        // Chunk 2: Send finish signal with empty delta and finish_reason: "tool_calls"
+        const payload2 = {
+          id: `chatcmpl-${id}`,
+          object: "chat.completion.chunk",
+          created: Math.floor(Date.now() / 1000),
+          model: requestRecord.model,
+          choices: [
+            {
+              index: 0,
+              delta: {},
               finish_reason: "tool_calls"
             }
           ]
         };
-        clientResponse.write(`data: ${JSON.stringify(payload)}\n\n`);
+        clientResponse.write(`data: ${JSON.stringify(payload2)}\n\n`);
         
         // Push progress to operator dashboard
         io.emit('reply:token', { id, token: `[Tool Call: ${(tool_calls[0].function && tool_calls[0].function.name) || tool_calls[0].name}]` });
@@ -342,7 +411,7 @@ app.post('/typing/:id', (req, res) => {
  * Uses the available GEMINI_API_KEY with the @google/genai SDK
  */
 app.post('/api/gemini/suggest', async (req, res) => {
-  const { messages } = req.body || {};
+  const { messages, id } = req.body || {};
   
   if (!messages || !Array.isArray(messages)) {
     return res.status(400).json({ error: "No messages context provided" });
@@ -363,14 +432,39 @@ app.post('/api/gemini/suggest', async (req, res) => {
       }
     });
 
+    const requestRecord = id ? requestsStore.getRequest(id) : null;
+
     // Format the conversation history for Gemini
     const userPrompt = messages.filter(m => m.role === 'user').map(m => m.content).join('\n\n');
     const fullConversation = messages.map(m => `[${m.role.toUpperCase()}]: ${m.content}`).join('\n');
+
+    let toolsInstruction = "";
+    if (requestRecord && requestRecord.tools && requestRecord.tools.length > 0) {
+      toolsInstruction = `
+CRITICAL DIRECTIVE:
+The client is looking for structured actions and has provided the following set of available tool capabilities:
+${JSON.stringify(requestRecord.tools, null, 2)}
+
+If the user's latest message prompts for an action that matches any of these tools (such as creating files, writing code, reading directories, or applying diffs), YOU MUST RESPOND WITH A VALID JSON PAYLOAD MATCHING ONE OF INDIVIDUAL TOOLS.
+Do NOT output plain conversational walkthroughs or chat preamble.
+
+You should select the correct tool and format the response in the direct tool shorthand JSON format, like this:
+{
+  "name": "<name of the tool>",
+  "arguments": {
+    "path": "<file_path_if_needed>",
+    "content": "<exact_code_or_file_content_to_apply>"
+  }
+}
+
+Only return a normal markdown/conversational response if none of the tools are relevant to what is being asked. Start directly with the suggested answer/code. Do not add metadata headers.`;
+    }
 
     const promptText = `You are a helpful and professional AI Co-Operator assisting a human software operator inside an editing console.
 The user is requesting help with code or a generic technical prompt.
 Please analyze the following conversation context and provide a highly useful, accurate, and complete programming or technical response draft that writing operators can use directly.
 Keep your response concise but extremely helpful, providing well-formatted code blocks where appropriate. Do NOT add any conversational meta-text like "Here is your response draft:" or conversational preamble. Start directly with the suggested answer/code.
+${toolsInstruction}
 
 CONTEXT CONVERSATION:
 ${fullConversation}

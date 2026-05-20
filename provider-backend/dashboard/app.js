@@ -662,7 +662,7 @@ document.getElementById('gemini-draft-btn').addEventListener('click', async (e) 
     const response = await fetch('/api/gemini/suggest', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: activeReq.messages }),
+      body: JSON.stringify({ messages: activeReq.messages, id: id }),
     });
 
     const data = await response.json();
