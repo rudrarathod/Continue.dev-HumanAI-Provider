@@ -89,7 +89,7 @@ app.post('/v1/chat/completions', (req, res) => {
   io.emit('request:new', record);
 
   // If client breaks the connection early, flag it on the dashboard
-  req.on('close', () => {
+  res.on('close', () => {
     const existing = requestsStore.getRequest(requestId);
     if (existing && existing.status === 'pending') {
       console.log(`[OpenAI Endpoint] Client closed connection for ${requestId} early (abandoned)`);
