@@ -38,6 +38,7 @@ const dom = {
   statChars: document.getElementById('stat-chars'),
   presetsContainer: document.getElementById('presets-container'),
   cancelReplyBtn: document.getElementById('cancel-reply-btn'),
+  pasteSendBtn: document.getElementById('paste-send-btn'),
   sendReplyBtn: document.getElementById('send-reply-btn'),
   deliveryStatus: document.getElementById('delivery-status'),
   footerApiUrl: document.getElementById('footer-api-url'),
@@ -479,10 +480,9 @@ dom.cancelReplyBtn.addEventListener('click', () => {
 });
 
 /**
- * Dispatch / Reply Trigger (POST /reply/:id)
+ * Automated Reply Sender Helper
  */
-dom.sendReplyBtn.addEventListener('click', async () => {
-  const content = dom.replyTextarea.value.trim();
+async function sendReply(content) {
   const id = state.selectedId;
 
   if (!id || !content) {
@@ -490,9 +490,13 @@ dom.sendReplyBtn.addEventListener('click', async () => {
     return;
   }
 
-  // Update button state visually
+  // Update button states visually
   dom.sendReplyBtn.disabled = true;
   dom.sendReplyBtn.innerHTML = '<i data-lucide="loader" class="w-3.5 h-3.5 animate-spin"></i> <span>Sending...</span>';
+  if (dom.pasteSendBtn) {
+    dom.pasteSendBtn.disabled = true;
+    dom.pasteSendBtn.innerHTML = '<i data-lucide="loader" class="w-3.5 h-3.5 animate-spin"></i> <span>Sending...</span>';
+  }
   lucide.createIcons();
 
   try {
@@ -509,18 +513,66 @@ dom.sendReplyBtn.addEventListener('click', async () => {
     } else {
       dom.deliveryStatus.textContent = `Error: ${parsed.error || 'Failed to dispatch'}`;
       showToast(`Dispatch failed: ${parsed.error || 'unspecified server error'}`, 'error');
-      dom.sendReplyBtn.disabled = false;
-      dom.sendReplyBtn.innerHTML = '<i data-lucide="send" class="w-3.5 h-3.5"></i> <span>Dispatch Response</span>';
-      lucide.createIcons();
     }
   } catch (error) {
     dom.deliveryStatus.textContent = 'Network offline or server died.';
     showToast('Network offline or operator backend is not responding.', 'error');
+  } finally {
     dom.sendReplyBtn.disabled = false;
     dom.sendReplyBtn.innerHTML = '<i data-lucide="send" class="w-3.5 h-3.5"></i> <span>Dispatch Response</span>';
+    if (dom.pasteSendBtn) {
+      dom.pasteSendBtn.disabled = false;
+      dom.pasteSendBtn.innerHTML = '<i data-lucide="zap" class="w-3.5 h-3.5"></i> <span>Paste & Send</span>';
+    }
     lucide.createIcons();
   }
+}
+
+/**
+ * Dispatch / Reply Trigger (POST /reply/:id)
+ */
+dom.sendReplyBtn.addEventListener('click', () => {
+  const content = dom.replyTextarea.value.trim();
+  sendReply(content);
 });
+
+/**
+ * Speed Shortcut: Paste & Send Trigger
+ */
+if (dom.pasteSendBtn) {
+  dom.pasteSendBtn.addEventListener('click', async () => {
+    if (dom.replyTextarea.disabled) {
+      showToast('Cannot reply to currently resolved or inactive requests!', 'warning');
+      return;
+    }
+
+    try {
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        dom.deliveryStatus.textContent = 'Reading clipboard...';
+        const clipboardText = await navigator.clipboard.readText();
+        
+        if (!clipboardText || clipboardText.trim() === '') {
+          showToast('Clipboard appears to be empty! Copied text not found.', 'warning');
+          dom.deliveryStatus.textContent = 'Ready to send.';
+          return;
+        }
+
+        // Paste into textarea and trigger dispatch instantly
+        dom.replyTextarea.value = clipboardText;
+        updateStatsCounter();
+        dom.deliveryStatus.textContent = 'Fast dispatching...';
+        await sendReply(clipboardText.trim());
+      } else {
+        throw new Error('Clipboard API not supported');
+      }
+    } catch (err) {
+      console.warn('Clipboard read failed: ', err);
+      showToast('Safety sandbox blocked clipboard reading. Paste (Ctrl+V) into the text area then click Send!', 'warning');
+      dom.deliveryStatus.textContent = 'Paste manually (Ctrl+V).';
+      dom.replyTextarea.focus();
+    }
+  });
+}
 
 /**
  * Custom Non-Blocking Toast Notification System
@@ -631,8 +683,56 @@ document.getElementById('copy-full-context-btn').addEventListener('click', (e) =
     return;
   }
   
-  // Format prompt exchange elegantly as Markdown
-  const formattedPrompt = activeReq.messages.map(m => `### ${m.role === 'user' ? 'Developer Prompt' : 'Assistant Context'}\n\n${m.content}`).join('\n\n');
+  let instructions = `[SYSTEM INSTRUCTION FOR THE RECIPIENT AI MODEL]
+You are acting as an API provider. Analyze the developer-assistant conversation below.
+Your final answer must resolve the last developer request.
+
+`;
+
+  if (activeReq.tools && activeReq.tools.length > 0) {
+    instructions += `CRITICAL CONFIGURATION:
+The developer's client has requested these tool capabilities:
+${JSON.stringify(activeReq.tools, null, 2)}
+
+If the last developer prompt asks to write code, create or edit files, or execute/run terminal commands, you MUST respond with a single valid JSON block in one of the formats below.
+Do not add conversational preamble. Output ONLY the raw JSON block.
+
+JSON Format Option A (Direct single tool call shorthand):
+{
+  "name": "<name_of_the_tool_e.g_createFile_or_editFile>",
+  "arguments": {
+    "path": "<file_path_e.g_src/App.tsx>",
+    "content": "<exact_complete_code_body_to_write_or_edit>"
+  }
+}
+
+JSON Format Option B (OpenAI standard tool_calls wrapper):
+{
+  "tool_calls": [
+    {
+      "type": "function",
+      "function": {
+        "name": "<name_of_the_tool>",
+        "arguments": {
+          "path": "<file_path>",
+          "content": "<content_or_arguments>"
+        }
+      }
+    }
+  ]
+}
+
+Otherwise, if it is a general question or prompt, reply with clean raw markdown content.
+---
+`;
+  } else {
+    instructions += `Answer the question with helpful markdown and clear explanations.
+---
+`;
+  }
+
+  instructions += `CONVERSATION HISTORY:\n\n`;
+  const formattedPrompt = instructions + activeReq.messages.map(m => `### ${m.role.toUpperCase()}:\n${m.content}`).join('\n\n');
   copyToClipboard(formattedPrompt, e.currentTarget);
 });
 
