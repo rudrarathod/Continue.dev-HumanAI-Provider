@@ -448,12 +448,17 @@ ${JSON.stringify(requestRecord.tools, null, 2)}
 If the user's latest message prompts for an action that matches any of these tools (such as creating files, writing code, reading directories, or applying diffs), YOU MUST RESPOND WITH A VALID JSON PAYLOAD MATCHING ONE OF INDIVIDUAL TOOLS.
 Do NOT output plain conversational walkthroughs or chat preamble.
 
+IMPORTANT: The keys inside "arguments" MUST EXACTLY match the properties defined in the "parameters" or "input_schema" of the chosen tool. For example:
+- If the chosen tool's parameters schema specifies "filepath" instead of "path", you MUST use "filepath"!
+- If the parameters schema specifies "content" or "code", you MUST use that exact key name!
+- Do not default to "path" if the schema demands "filepath". Match the tool schema properties precisely.
+
 You should select the correct tool and format the response in the direct tool shorthand JSON format, like this:
 {
   "name": "<name of the tool>",
   "arguments": {
-    "path": "<file_path_if_needed>",
-    "content": "<exact_code_or_file_content_to_apply>"
+    "filepath": "<exact_file_path_specified_by_tool_parameters_key>",
+    "content": "<exact_complete_code_body_to_write_or_edit_or_correct_key_from_schema>"
   }
 }
 

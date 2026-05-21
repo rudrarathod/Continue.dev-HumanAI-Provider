@@ -697,12 +697,17 @@ ${JSON.stringify(activeReq.tools, null, 2)}
 If the last developer prompt asks to write code, create or edit files, or execute/run terminal commands, you MUST respond with a single valid JSON block in one of the formats below.
 Do not add conversational preamble. Output ONLY the raw JSON block.
 
+IMPORTANT: The keys inside "arguments" MUST EXACTLY match the properties defined in the "parameters" or "input_schema" of the tool. For example:
+- If the tool parameters schema specifies "filepath" instead of "path", you MUST use "filepath"!
+- If the tool parameters schema specifies "content" or "code", you MUST use that exact key name!
+- Do not default to "path" if the schema demands "filepath". Match the tool schema properties precisely.
+
 JSON Format Option A (Direct single tool call shorthand):
 {
-  "name": "<name_of_the_tool_e.g_createFile_or_editFile>",
+  "name": "<name_of_the_tool_e.g_create_new_file_or_editFile>",
   "arguments": {
-    "path": "<file_path_e.g_src/App.tsx>",
-    "content": "<exact_complete_code_body_to_write_or_edit>"
+    "filepath": "<exact_file_path_specified_by_tool_parameters_key>",
+    "content": "<exact_complete_code_body_to_write_or_edit_or_correct_key>"
   }
 }
 
@@ -714,7 +719,7 @@ JSON Format Option B (OpenAI standard tool_calls wrapper):
       "function": {
         "name": "<name_of_the_tool>",
         "arguments": {
-          "path": "<file_path>",
+          "filepath": "<exact_file_path_specified_by_tool_parameters_key>",
           "content": "<content_or_arguments>"
         }
       }
@@ -817,6 +822,9 @@ function openToolBuilder(tool) {
   dom.selectedToolName.textContent = toolName;
   dom.toolBuilder.classList.remove('hidden');
   
+  // Store the active tool in the global state
+  state.currentBuilderTool = tool;
+  
   // Set values & placeholders based on common naming patterns
   dom.toolPathInput.value = '';
   dom.toolParamsInput.value = '';
@@ -854,9 +862,45 @@ dom.toolGenerateJsonBtn.addEventListener('click', () => {
     return;
   }
   
+  // Dynamically inspect selected tool schema parameter names
+  let fileKeyName = 'path';
+  let contentKeyName = 'content';
+  const checkTool = state.currentBuilderTool;
+  
+  if (checkTool) {
+    const params = (checkTool.function && checkTool.function.parameters) || checkTool.parameters || checkTool.input_schema;
+    if (params && params.properties) {
+      // 1. Detect file/path target key name
+      if ('filepath' in params.properties) {
+        fileKeyName = 'filepath';
+      } else if ('path' in params.properties) {
+        fileKeyName = 'path';
+      } else {
+        const found = Object.keys(params.properties).find(k => k.toLowerCase().includes('path'));
+        if (found) {
+          fileKeyName = found;
+        }
+      }
+      
+      // 2. Detect content/code block target key name
+      if ('content' in params.properties) {
+        contentKeyName = 'content';
+      } else if ('code' in params.properties) {
+        contentKeyName = 'code';
+      } else if ('text' in params.properties) {
+        contentKeyName = 'text';
+      } else {
+        const found = Object.keys(params.properties).find(k => k.toLowerCase().includes('content') || k.toLowerCase().includes('code') || k.toLowerCase().includes('text'));
+        if (found) {
+          contentKeyName = found;
+        }
+      }
+    }
+  }
+
   const args = {};
   if (pathVal) {
-    args.path = pathVal;
+    args[fileKeyName] = pathVal;
   }
   
   if (paramsVal) {
@@ -869,7 +913,7 @@ dom.toolGenerateJsonBtn.addEventListener('click', () => {
   }
   
   if (contentVal) {
-    args.content = contentVal;
+    args[contentKeyName] = contentVal;
   }
   
   const payload = {
